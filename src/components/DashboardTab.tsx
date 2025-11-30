@@ -1,7 +1,7 @@
+import { useEffect, useState } from "react";
 import MetricCard from "./MetricCard";
 import { Sparkles, CalendarRange } from "lucide-react";
 import type { Invoice, InvoiceStatus } from "../data/mockInvoices";
-import { WEEK_LABELS } from "../data/mockInvoices";
 
 const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 const formatDate = (value: string) => new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
@@ -17,7 +17,67 @@ type Props = {
   invoices: Invoice[];
 };
 
+type CashflowSummaryResponse = {
+  metrics: {
+    totalOutstanding: number;
+    totalPaid: number;
+    countOverdue: number;
+    countDueSoon: number;
+  };
+  summary: string;
+};
+
 export default function DashboardTab({ dateRange, invoices }: Props) {
+  const [summary, setSummary] = useState<string>("");
+  const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
+  const [summaryError, setSummaryError] = useState<boolean>(false);
+
+  const apiBases = (() => {
+    if (typeof window === "undefined") return [""];
+    const isDev = window.location.port === "5175" || window.location.hostname === "localhost";
+    return isDev ? [""] : ["/cashflow-api", "http://185.151.29.141:3002"];
+  })();
+
+  useEffect(() => {
+    const fetchSummary = async () => {
+      setSummaryLoading(true);
+      setSummaryError(false);
+      try {
+        const endpoints = apiBases.map((base) => `${base}/api/cashflow-summary`);
+        let success = false;
+        let data: CashflowSummaryResponse | null = null;
+
+        for (const url of endpoints) {
+          try {
+            const res = await fetch(url);
+            if (!res.ok) {
+              console.error("Cashflow summary request failed", res.status, "at", url);
+              continue;
+            }
+            data = (await res.json()) as CashflowSummaryResponse;
+            console.log("Cashflow summary response:", data);
+            success = true;
+            break;
+          } catch (err) {
+            console.error("Cashflow summary fetch error at", url, err);
+          }
+        }
+
+        if (!success || !data) {
+          throw new Error("No successful summary response");
+        }
+
+        setSummary(data.summary ?? "");
+      } catch (err) {
+        console.error("Failed to load cashflow summary", err);
+        setSummaryError(true);
+      } finally {
+        setSummaryLoading(false);
+      }
+    };
+    fetchSummary();
+  }, []);
+
   const payable = invoices.filter((inv) => inv.status !== "Paid");
 
   const now = new Date("2024-12-01T00:00:00Z"); // fixed “today” for consistent demo calculations
@@ -48,18 +108,6 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
     .filter((inv) => inv.status === "Overdue" || daysDiff(inv.dueDate) <= 5)
     .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
     .slice(0, 5);
-
-  const weekTotals = Object.entries(
-    payable.reduce<Record<string, number>>((acc, inv) => {
-      acc[inv.weekId] = (acc[inv.weekId] ?? 0) + inv.amount;
-      return acc;
-    }, {}),
-  ).map(([weekId, total]) => ({
-    label: WEEK_LABELS[weekId] ?? weekId,
-    amount: total,
-  }));
-
-  const maxOutgoing = weekTotals.length ? Math.max(...weekTotals.map((w) => w.amount)) : 1;
 
   return (
     <div className="space-y-8">
@@ -153,11 +201,14 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
           <div className="flex items-start gap-3 text-sm text-slate-800">
             <Sparkles className="mt-1 h-5 w-5 text-cyan-600" />
             <div className="space-y-2">
-              <p>You have £8,500 due in the next 7 days across 6 invoices. Biggest exposure is Supplier X with £3,200 due on 3 Dec.</p>
-              <p>Utilities and marketing drive most near-term spend. Resolve Aurora Marketing and Northwind Utilities to prevent service gaps.</p>
-              <p className="text-slate-600">
-                View the full cashflow timeline in the Cashflow tab for week-by-week detail.
-              </p>
+              <p className="text-sm font-semibold text-slate-900">AI Summary</p>
+              {summaryLoading && <p>Analysing your cashflow…</p>}
+              {summaryError && <p className="text-rose-600">AI summary unavailable. Please try again later.</p>}
+              {!summaryLoading && !summaryError && summary && <p className="whitespace-pre-line">{summary}</p>}
+              {!summaryLoading && !summaryError && !summary && (
+                <p className="text-slate-700">Summary not available yet. Please try again shortly.</p>
+              )}
+              <p className="text-slate-600">View the full cashflow timeline in the Cashflow tab for week-by-week detail.</p>
             </div>
           </div>
         </div>

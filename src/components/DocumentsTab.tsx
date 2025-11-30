@@ -10,6 +10,9 @@ const formatInvoiceDate = (value: string | null | undefined) => {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 };
 
+const getIssueDate = (invoice: Invoice): string | undefined => invoice.issue_date ?? invoice.issueDate;
+const getDueDate = (invoice: Invoice): string | undefined => invoice.due_date ?? invoice.dueDate;
+
 const statusStyles: Record<Extract<InvoiceStatus, "Overdue" | "Due soon" | "Upcoming" | "Paid">, string> = {
   Overdue: "bg-rose-50 text-rose-700 border-rose-100",
   "Due soon": "bg-amber-50 text-amber-700 border-amber-100",
@@ -70,10 +73,11 @@ export default function DocumentsTab({
     [invoices, selectedDocId],
   );
 
-  const apiBase =
-    typeof window !== "undefined" && window.location.pathname.startsWith("/cashflow-dev")
-      ? "/cashflow-dev"
-      : "";
+  const apiBases = (() => {
+    if (typeof window === "undefined") return [""];
+    const isDev = window.location.port === "5175" || window.location.hostname === "localhost";
+    return isDev ? [""] : ["/cashflow-api", "http://185.151.29.141:3002"];
+  })();
 
   const toggleEmailStatus = () => {
     setEmailConnected((prev) => !prev);
@@ -86,33 +90,50 @@ export default function DocumentsTab({
 
   const handleFileUpload = async (file: File) => {
     if (!file) return;
-    setUploadStatus("uploading");
-    setUploadMessage("Uploading invoice…");
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch(`${apiBase}/api/upload-invoice`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!response.ok) {
-        console.error("Upload failed", response.status);
+      setUploadStatus("uploading");
+      setUploadMessage("Uploading invoice…");
+      try {
+        const endpoints = apiBases.map((base) => `${base}/api/upload-invoice`);
+        let success = false;
+        let data: any = null;
+
+        for (const url of endpoints) {
+          try {
+            const formData = new FormData();
+            formData.append("file", file);
+            const response = await fetch(url, {
+              method: "POST",
+              body: formData,
+            });
+            if (!response.ok) {
+              console.error("Upload failed", response.status, "at", url);
+              continue;
+            }
+            data = await response.json();
+            success = true;
+            break;
+          } catch (err) {
+            console.error("Upload error at", url, err);
+          }
+        }
+
+        if (!success) {
+          setUploadStatus("error");
+          setUploadMessage("Upload failed. Please try again.");
+          return;
+        }
+
+        console.log("Upload success:", data);
+        setUploadStatus("success");
+        setUploadMessage("File uploaded successfully.");
+        if (data?.invoice && onInvoiceCreatedFromUpload) {
+          onInvoiceCreatedFromUpload(data.invoice as Invoice);
+        }
+      } catch (error) {
+        console.error("Upload error", error);
         setUploadStatus("error");
-        setUploadMessage("Upload failed. Please try again.");
-        return;
+        setUploadMessage("Upload failed. Please check your connection and try again.");
       }
-      const data = await response.json();
-      console.log("Upload success:", data);
-      setUploadStatus("success");
-      setUploadMessage("File uploaded successfully.");
-      if (data?.invoice && onInvoiceCreatedFromUpload) {
-        onInvoiceCreatedFromUpload(data.invoice as Invoice);
-      }
-    } catch (error) {
-      console.error("Upload error", error);
-      setUploadStatus("error");
-      setUploadMessage("Upload failed. Please check your connection and try again.");
-    }
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,7 +173,7 @@ export default function DocumentsTab({
                 type="file"
                 className="hidden"
                 onChange={handleFileChange}
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                accept=".pdf,.doc,.docx,.txt,image/*"
               />
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-cyan-50 text-cyan-600 shadow-sm">
                 <UploadCloud className="h-6 w-6" />
@@ -305,11 +326,11 @@ export default function DocumentsTab({
               <tbody className="divide-y divide-slate-100">
                 {filteredDocuments.map((doc) => (
                   <tr key={doc.id} className="hover:bg-slate-50/70">
-                    <td className="px-3 py-3 text-slate-600">{formatInvoiceDate(doc.issue_date)}</td>
+                    <td className="px-3 py-3 text-slate-600">{formatInvoiceDate(getIssueDate(doc))}</td>
                     <td className="px-3 py-3 font-semibold text-slate-900">{doc.supplier}</td>
                     <td className="px-3 py-3 text-slate-600">{doc.invoiceNumber}</td>
                     <td className="px-3 py-3 font-semibold text-slate-900">{currency.format(doc.amount)}</td>
-                    <td className="px-3 py-3 text-slate-600">{formatInvoiceDate(doc.due_date)}</td>
+                    <td className="px-3 py-3 text-slate-600">{formatInvoiceDate(getDueDate(doc))}</td>
                     <td className="px-3 py-3">
                       <span
                         className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
@@ -386,11 +407,11 @@ export default function DocumentsTab({
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div>
                     <p className="text-xs text-slate-500">Issue date</p>
-                    <p className="font-medium text-slate-900">{formatInvoiceDate(selectedDoc.issue_date)}</p>
+                    <p className="font-medium text-slate-900">{formatInvoiceDate(getIssueDate(selectedDoc))}</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Due date</p>
-                    <p className="font-medium text-slate-900">{formatInvoiceDate(selectedDoc.due_date)}</p>
+                    <p className="font-medium text-slate-900">{formatInvoiceDate(getDueDate(selectedDoc))}</p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Subtotal</p>

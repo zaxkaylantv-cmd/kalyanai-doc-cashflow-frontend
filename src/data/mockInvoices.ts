@@ -7,8 +7,10 @@ export interface Invoice {
   invoiceNumber: string;
   issueDate: string; // ISO date
   dueDate: string; // ISO date
-   issue_date?: string;
-   due_date?: string;
+  issue_date?: string;
+  due_date?: string;
+  dueDateIso?: string;
+  due_date_iso?: string;
   amount: number;
   status: InvoiceStatus;
   category: "Rent" | "Utilities" | "Marketing" | "Staff" | "Software" | "Other";

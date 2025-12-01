@@ -2,14 +2,22 @@ import { useEffect, useState } from "react";
 import MetricCard from "./MetricCard";
 import { Sparkles, CalendarRange } from "lucide-react";
 import type { Invoice, InvoiceStatus } from "../data/mockInvoices";
+import { formatRangeLabel, isInvoiceInDateRange } from "../utils/dateRangeFilter";
+import type { DateRangeFilter } from "../utils/dateRangeFilter";
+import { getDisplayStatus, getInvoiceDueDate, formatDisplayDate } from "../utils/invoiceDates";
 
 const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
-const formatDate = (value: string) => new Date(value).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 
-const statusStyles: Record<Extract<InvoiceStatus, "Overdue" | "Due soon" | "Upcoming">, string> = {
+const isOutstanding = (inv: Invoice): boolean => {
+  const status = (inv.status || "").toLowerCase();
+  return status !== "paid" && status !== "archived" && inv.amount > 0;
+};
+
+const statusStyles: Record<string, string> = {
   Overdue: "bg-rose-50 text-rose-700 border-rose-100",
   "Due soon": "bg-amber-50 text-amber-700 border-amber-100",
   Upcoming: "bg-emerald-50 text-emerald-700 border-emerald-100",
+  Unpaid: "bg-slate-100 text-slate-700 border-slate-200",
 };
 
 type Props = {
@@ -27,10 +35,12 @@ type CashflowSummaryResponse = {
   summary: string;
 };
 
-export default function DashboardTab({ dateRange, invoices }: Props) {
+export default function DashboardTab({ dateRange: _dateRange, invoices }: Props) {
   const [summary, setSummary] = useState<string>("");
   const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
   const [summaryError, setSummaryError] = useState<boolean>(false);
+  const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeFilter>("last_90_days");
+  const [metrics, setMetrics] = useState<CashflowSummaryResponse["metrics"] | null>(null);
 
   const apiBases = (() => {
     if (typeof window === "undefined") return [""];
@@ -43,7 +53,8 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
       setSummaryLoading(true);
       setSummaryError(false);
       try {
-        const endpoints = apiBases.map((base) => `${base}/api/cashflow-summary`);
+        const range = dateRangeFilter || "all";
+        const endpoints = apiBases.map((base) => `${base}/api/cashflow-summary?range=${encodeURIComponent(range)}`);
         let success = false;
         let data: CashflowSummaryResponse | null = null;
 
@@ -68,6 +79,7 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
         }
 
         setSummary(data.summary ?? "");
+        setMetrics(data.metrics ?? null);
       } catch (err) {
         console.error("Failed to load cashflow summary", err);
         setSummaryError(true);
@@ -76,38 +88,69 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
       }
     };
     fetchSummary();
-  }, []);
+  }, [dateRangeFilter]);
 
-  const payable = invoices.filter((inv) => inv.status !== "Paid");
+  const now = new Date();
+  const outstanding = invoices.filter(isOutstanding);
+  const payable = outstanding;
 
-  const now = new Date("2024-12-01T00:00:00Z"); // fixed “today” for consistent demo calculations
-  const daysDiff = (due: string) => {
-    const diff = new Date(due).getTime() - now.getTime();
-    return Math.round(diff / (1000 * 60 * 60 * 24));
-  };
+  const openInvoicesWithDate = outstanding
+    .map((inv) => {
+      const due = getInvoiceDueDate(inv);
+      return { inv, due };
+    })
+    .filter((x) => x.due);
 
-  const dueIn7 = payable.filter((inv) => {
-    const d = daysDiff(inv.dueDate);
-    return d >= 0 && d <= 7;
+  const dueIn7 = openInvoicesWithDate.filter(({ due }) => {
+    if (!due) return false;
+    const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+    return diff >= 0 && diff <= 7;
   });
 
-  const dueIn30 = payable.filter((inv) => {
-    const d = daysDiff(inv.dueDate);
-    return d >= 0 && d <= 30;
+  const dueIn30 = openInvoicesWithDate.filter(({ due }) => {
+    if (!due) return false;
+    const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+    return diff >= 0 && diff <= 30;
   });
 
-  const overdue = payable.filter((inv) => inv.status === "Overdue");
+  const overdue = openInvoicesWithDate.filter(({ due }) => {
+    if (!due) return false;
+    const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+    return diff < 0;
+  });
 
-  const upcomingNotPaid = payable.filter((inv) => inv.status !== "Overdue");
+  const dueIn7Amount = dueIn7.reduce((sum, item) => sum + item.inv.amount, 0);
+  const dueIn30Amount = dueIn30.reduce((sum, item) => sum + item.inv.amount, 0);
+  const overdueAmount = overdue.reduce((sum, item) => sum + item.inv.amount, 0);
+
+  const upcomingNotPaid = outstanding.filter((inv) => {
+    const due = getInvoiceDueDate(inv);
+    if (!due) return false;
+    const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+    return diff >= 0;
+  });
   const largestUpcoming =
     upcomingNotPaid.length > 0
       ? upcomingNotPaid.reduce((prev, curr) => (curr.amount > prev.amount ? curr : prev))
       : null;
 
   const attentionInvoices = payable
-    .filter((inv) => inv.status === "Overdue" || daysDiff(inv.dueDate) <= 5)
-    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
-    .slice(0, 5);
+    .filter((inv) => {
+      const status = getDisplayStatus(inv, now);
+      const due = getInvoiceDueDate(inv);
+      if (!due) return false;
+      const diff = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+      const inWindow = diff <= 30 && diff >= -365; // include overdue too
+      return status !== "Paid" && inWindow && isInvoiceInDateRange(inv, dateRangeFilter, now);
+    })
+    .sort((a, b) => {
+      const aDue = getInvoiceDueDate(a)?.getTime() ?? Infinity;
+      const bDue = getInvoiceDueDate(b)?.getTime() ?? Infinity;
+      return aDue - bDue;
+    })
+    .slice(0, 7);
+
+  const rangeLabel = formatRangeLabel(dateRangeFilter, now);
 
   return (
     <div className="space-y-8">
@@ -117,29 +160,39 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
           <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
           <p className="text-slate-500">A clear, AI-supported view of what&apos;s due, what&apos;s overdue, and where to focus.</p>
         </div>
-        <button className="inline-flex items-center rounded-lg border border-cyan-100 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-cyan-50">
+        <div className="inline-flex items-center rounded-lg border border-cyan-100 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm">
           <CalendarRange className="mr-2 h-4 w-4 text-cyan-600" />
-          {dateRange}
-        </button>
+          <select
+            className="bg-transparent focus:outline-none"
+            value={dateRangeFilter}
+            onChange={(e) => setDateRangeFilter(e.target.value as DateRangeFilter)}
+          >
+            <option value="last_30_days">Last 30 days</option>
+            <option value="last_90_days">Last 90 days</option>
+            <option value="last_12_months">Last 12 months</option>
+            <option value="all">All time</option>
+          </select>
+          <span className="ml-3 text-xs font-medium text-slate-500">{rangeLabel}</span>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard
           title="Due in next 7 days"
-          amount={currency.format(dueIn7.reduce((sum, inv) => sum + inv.amount, 0))}
-          hint={`${dueIn7.length} invoices to keep on track`}
+          amount={currency.format(dueIn7Amount)}
+          hint={`${metrics?.countDueSoon ?? dueIn7.length} invoices to keep on track`}
           gradientIndex={0}
         />
         <MetricCard
           title="Due in next 30 days"
-          amount={currency.format(dueIn30.reduce((sum, inv) => sum + inv.amount, 0))}
+          amount={currency.format(dueIn30Amount)}
           hint={`${dueIn30.length} invoices in this window`}
           gradientIndex={1}
         />
         <MetricCard
           title="Overdue"
-          amount={currency.format(overdue.reduce((sum, inv) => sum + inv.amount, 0))}
-          hint={`${overdue.length} invoices to resolve`}
+          amount={currency.format(overdueAmount)}
+          hint={`${metrics?.countOverdue ?? overdue.length} invoices to resolve`}
           gradientIndex={2}
         />
         <MetricCard
@@ -147,7 +200,7 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
           amount={largestUpcoming ? currency.format(largestUpcoming.amount) : "£0"}
           hint={
             largestUpcoming
-              ? `${largestUpcoming.supplier} · Due ${formatDate(largestUpcoming.dueDate)}`
+              ? `${largestUpcoming.supplier} · Due ${formatDisplayDate(getInvoiceDueDate(largestUpcoming))}`
               : "No large bills this cycle"
           }
           gradientIndex={3}
@@ -178,17 +231,25 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
                     <td className="px-3 py-2 font-semibold text-slate-900">{item.supplier}</td>
                     <td className="px-3 py-2 text-slate-600">{item.invoiceNumber}</td>
                     <td className="px-3 py-2 font-semibold text-slate-900">{currency.format(item.amount)}</td>
-                    <td className="px-3 py-2 text-slate-600">{formatDate(item.dueDate)}</td>
+                    <td className="px-3 py-2 text-slate-600">{formatDisplayDate(getInvoiceDueDate(item))}</td>
                     <td className="px-3 py-2">
-                      {item.status !== "Paid" && item.status !== "Archived" && (
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                            statusStyles[item.status as Extract<InvoiceStatus, "Overdue" | "Due soon" | "Upcoming">]
-                          }`}
-                        >
-                          {item.status}
-                        </span>
-                      )}
+                      {(() => {
+                        const displayStatus = getDisplayStatus(item, now);
+                        return displayStatus !== "Paid" ? (
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                              statusStyles[
+                                (displayStatus as Extract<InvoiceStatus, "Overdue" | "Due soon" | "Upcoming">) in
+                                statusStyles
+                                  ? (displayStatus as Extract<InvoiceStatus, "Overdue" | "Due soon" | "Upcoming">)
+                                  : "Upcoming"
+                              ]
+                            }`}
+                          >
+                            {displayStatus}
+                          </span>
+                        ) : null;
+                      })()}
                     </td>
                     <td className="px-3 py-2 text-slate-600">{item.category}</td>
                   </tr>
@@ -198,10 +259,12 @@ export default function DashboardTab({ dateRange, invoices }: Props) {
           </div>
         </div>
         <div className="rounded-2xl border border-cyan-100 bg-gradient-to-r from-cyan-50 via-blue-50 to-purple-50 p-4 shadow-[0_18px_28px_rgba(0,184,255,0.12)]">
-          <div className="flex items-start gap-3 text-sm text-slate-800">
-            <Sparkles className="mt-1 h-5 w-5 text-cyan-600" />
+          <div className="flex flex-col items-center gap-3 text-center text-sm text-slate-800">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/70 text-cyan-600 shadow-sm">
+              <Sparkles className="h-5 w-5" />
+            </div>
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-slate-900">AI Summary</p>
+              <p className="text-sm font-semibold text-slate-900">AI Cash Flow Analysis</p>
               {summaryLoading && <p>Analysing your cashflow…</p>}
               {summaryError && <p className="text-rose-600">AI summary unavailable. Please try again later.</p>}
               {!summaryLoading && !summaryError && summary && <p className="whitespace-pre-line">{summary}</p>}

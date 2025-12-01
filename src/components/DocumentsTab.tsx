@@ -1,6 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import { Mail, UploadCloud, FileText } from "lucide-react";
 import type { Invoice, InvoiceSource, InvoiceStatus } from "../data/mockInvoices";
+import type { DateRangeFilter } from "../utils/dateRangeFilter";
+import { isInvoiceInDateRange } from "../utils/dateRangeFilter";
 
 const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 const formatInvoiceDate = (value: string | null | undefined) => {
@@ -50,21 +52,23 @@ export default function DocumentsTab({
     category: "All",
     source: "All",
     supplier: "",
-    dateRange: "Last 90 days",
+    dateRange: "last_90_days" as DateRangeFilter,
   });
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const filteredDocuments = useMemo(
     () =>
-      invoices.filter((doc) => {
-        const statusMatch = filters.status === "All" || doc.status === filters.status;
-        const categoryMatch = filters.category === "All" || doc.category === filters.category;
-        const sourceMatch = filters.source === "All" || doc.source === filters.source;
-        const supplierMatch =
-          filters.supplier.trim().length === 0 ||
-          doc.supplier.toLowerCase().includes(filters.supplier.trim().toLowerCase());
-        return statusMatch && categoryMatch && sourceMatch && supplierMatch;
-      }),
+      invoices
+        .filter((doc) => isInvoiceInDateRange(doc, filters.dateRange, new Date()))
+        .filter((doc) => {
+          const statusMatch = filters.status === "All" || doc.status === filters.status;
+          const categoryMatch = filters.category === "All" || doc.category === filters.category;
+          const sourceMatch = filters.source === "All" || doc.source === filters.source;
+          const supplierMatch =
+            filters.supplier.trim().length === 0 ||
+            doc.supplier.toLowerCase().includes(filters.supplier.trim().toLowerCase());
+          return statusMatch && categoryMatch && sourceMatch && supplierMatch;
+        }),
     [invoices, filters],
   );
 
@@ -258,11 +262,12 @@ export default function DocumentsTab({
               <select
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"
                 value={filters.dateRange}
-                onChange={(e) => setFilters((prev) => ({ ...prev, dateRange: e.target.value }))}
+                onChange={(e) => setFilters((prev) => ({ ...prev, dateRange: e.target.value as DateRangeFilter }))}
               >
-                <option>Last 30 days</option>
-                <option>Last 90 days</option>
-                <option>YTD</option>
+                <option value="last_30_days">Last 30 days</option>
+                <option value="last_90_days">Last 90 days</option>
+                <option value="last_12_months">Last 12 months</option>
+                <option value="all">All</option>
               </select>
             </div>
             <div>

@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { Mail, UploadCloud, FileText } from "lucide-react";
 import type { Invoice, InvoiceSource, InvoiceStatus } from "../data/mockInvoices";
 import type { DateRangeFilter } from "../utils/dateRangeFilter";
-import { isInvoiceInDateRange } from "../utils/dateRangeFilter";
+import { isInvoiceInDateRange, formatRangeLabel } from "../utils/dateRangeFilter";
 
 const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 const formatInvoiceDate = (value: string | null | undefined) => {
@@ -15,16 +15,53 @@ const formatInvoiceDate = (value: string | null | undefined) => {
 const getIssueDate = (invoice: Invoice): string | undefined => invoice.issue_date ?? invoice.issueDate;
 const getDueDate = (invoice: Invoice): string | undefined => invoice.due_date ?? invoice.dueDate;
 
-const statusStyles: Record<Extract<InvoiceStatus, "Overdue" | "Due soon" | "Upcoming" | "Paid">, string> = {
+const statusStyles: Record<InvoiceStatus, string> = {
   Overdue: "bg-rose-50 text-rose-700 border-rose-100",
   "Due soon": "bg-amber-50 text-amber-700 border-amber-100",
   Upcoming: "bg-emerald-50 text-emerald-700 border-emerald-100",
   Paid: "bg-slate-100 text-slate-700 border-slate-200",
+  Archived: "bg-slate-100 text-slate-500 border-slate-200",
 };
 
 const sourceStyles: Record<InvoiceSource, string> = {
   Upload: "bg-cyan-50 text-cyan-700 border-cyan-100",
   Email: "bg-indigo-50 text-indigo-700 border-indigo-100",
+};
+
+const DOCUMENTS_RANGE_KEY = "cashflow_documents_date_range";
+
+const normalizeDate = (d: Date) => {
+  const copy = new Date(d);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+};
+
+const computeInvoiceStatus = (invoice: Invoice, today: Date = new Date()): InvoiceStatus => {
+  if (invoice.status === "Paid" || invoice.status === "Archived") {
+    return invoice.status;
+  }
+
+  const dueRaw = getDueDate(invoice);
+  const dueDate = dueRaw ? new Date(dueRaw) : null;
+
+  if (!dueDate || isNaN(dueDate.getTime())) {
+    return "Upcoming";
+  }
+
+  const todayMid = normalizeDate(today);
+  const dueMid = normalizeDate(dueDate);
+
+  if (dueMid.getTime() < todayMid.getTime()) {
+    return "Overdue";
+  }
+
+  const diffDays = (dueMid.getTime() - todayMid.getTime()) / (1000 * 60 * 60 * 24);
+
+  if (diffDays <= 7) {
+    return "Due soon";
+  }
+
+  return "Upcoming";
 };
 
 type Props = {
@@ -42,18 +79,38 @@ export default function DocumentsTab({
   onInvoiceCreatedFromUpload,
   onArchiveInvoice,
 }: Props) {
+  const now = useMemo(() => new Date(), []);
+
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [emailConnected, setEmailConnected] = useState(true);
   const [emailPaused, setEmailPaused] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
-  const [filters, setFilters] = useState({
-    status: "All",
-    category: "All",
-    source: "All",
-    supplier: "",
-    dateRange: "last_90_days" as DateRangeFilter,
+  const [filters, setFilters] = useState(() => {
+    const fallback: DateRangeFilter = "all";
+    if (typeof window === "undefined") {
+      return {
+        status: "All",
+        category: "All",
+        source: "All",
+        supplier: "",
+        dateRange: fallback,
+      };
+    }
+
+    const stored = window.localStorage.getItem(DOCUMENTS_RANGE_KEY);
+    const validRanges: DateRangeFilter[] = ["all", "last_30_days", "last_90_days", "next_14_days", "next_3_months"];
+    const range = stored && (validRanges as string[]).includes(stored) ? (stored as DateRangeFilter) : fallback;
+
+    return {
+      status: "All",
+      category: "All",
+      source: "All",
+      supplier: "",
+      dateRange: range,
+    };
   });
+  const dateRangeLabel = useMemo(() => formatRangeLabel(filters.dateRange, now), [filters.dateRange, now]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const filteredDocuments = useMemo(
@@ -158,10 +215,15 @@ export default function DocumentsTab({
 
   return (
     <div className="space-y-8">
-      <div>
-        <p className="text-sm uppercase tracking-[0.16em] text-cyan-600">Documents</p>
-        <h1 className="text-3xl font-bold text-slate-900">Documents</h1>
-        <p className="text-slate-500">Keep every invoice in one place. AI reads them for you and keeps cashflow current.</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm uppercase tracking-[0.16em] text-cyan-600">Documents</p>
+          <h1 className="text-3xl font-bold text-slate-900">Documents</h1>
+          <p className="text-slate-500">Keep every invoice in one place. AI reads them for you and keeps cashflow current.</p>
+        </div>
+        <span className="inline-flex items-center rounded-full border border-cyan-100 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm">
+          {dateRangeLabel}
+        </span>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -262,12 +324,19 @@ export default function DocumentsTab({
               <select
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2"
                 value={filters.dateRange}
-                onChange={(e) => setFilters((prev) => ({ ...prev, dateRange: e.target.value as DateRangeFilter }))}
+                onChange={(e) => {
+                  const next = e.target.value as DateRangeFilter;
+                  setFilters((prev) => ({ ...prev, dateRange: next }));
+                  if (typeof window !== "undefined") {
+                    window.localStorage.setItem(DOCUMENTS_RANGE_KEY, next);
+                  }
+                }}
               >
                 <option value="last_30_days">Last 30 days</option>
                 <option value="last_90_days">Last 90 days</option>
-                <option value="last_12_months">Last 12 months</option>
-                <option value="all">All</option>
+                <option value="next_14_days">Next 14 days</option>
+                <option value="next_3_months">Next 3 months</option>
+                <option value="all">All time</option>
               </select>
             </div>
             <div>
@@ -329,35 +398,36 @@ export default function DocumentsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredDocuments.map((doc) => (
-                  <tr key={doc.id} className="hover:bg-slate-50/70">
-                    <td className="px-3 py-3 text-slate-600">{formatInvoiceDate(getIssueDate(doc))}</td>
-                    <td className="px-3 py-3 font-semibold text-slate-900">{doc.supplier}</td>
-                    <td className="px-3 py-3 text-slate-600">{doc.invoiceNumber}</td>
-                    <td className="px-3 py-3 font-semibold text-slate-900">{currency.format(doc.amount)}</td>
-                    <td className="px-3 py-3 text-slate-600">{formatInvoiceDate(getDueDate(doc))}</td>
-                    <td className="px-3 py-3">
-                      <span
-                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
-                          statusStyles[doc.status as Extract<InvoiceStatus, "Overdue" | "Due soon" | "Upcoming" | "Paid">]
-                        }`}
-                      >
-                        {doc.status}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3 text-slate-600">{doc.category}</td>
-                    <td className="px-3 py-3">
-                      <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${sourceStyles[doc.source]}`}>
-                        {doc.source}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">
-                      <button className="text-cyan-700 hover:text-cyan-800" onClick={() => setSelectedDocId(doc.id)}>
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {filteredDocuments.map((doc) => {
+                  const computedStatus = computeInvoiceStatus(doc);
+                  return (
+                    <tr key={doc.id} className="hover:bg-slate-50/70">
+                      <td className="px-3 py-3 text-slate-600">{formatInvoiceDate(getIssueDate(doc))}</td>
+                      <td className="px-3 py-3 font-semibold text-slate-900">{doc.supplier}</td>
+                      <td className="px-3 py-3 text-slate-600">{doc.invoiceNumber}</td>
+                      <td className="px-3 py-3 font-semibold text-slate-900">{currency.format(doc.amount)}</td>
+                      <td className="px-3 py-3 text-slate-600">{formatInvoiceDate(getDueDate(doc))}</td>
+                      <td className="px-3 py-3">
+                        <span
+                          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${statusStyles[computedStatus]}`}
+                        >
+                          {computedStatus}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-slate-600">{doc.category}</td>
+                      <td className="px-3 py-3">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${sourceStyles[doc.source]}`}>
+                          {doc.source}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <button className="text-cyan-700 hover:text-cyan-800" onClick={() => setSelectedDocId(doc.id)}>
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -387,13 +457,16 @@ export default function DocumentsTab({
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-slate-500">Status</p>
-                  <span
-                    className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                      statusStyles[selectedDoc.status as Extract<InvoiceStatus, "Overdue" | "Due soon" | "Upcoming" | "Paid">]
-                    }`}
-                  >
-                    {selectedDoc.status}
-                  </span>
+                  {(() => {
+                    const computedStatus = computeInvoiceStatus(selectedDoc);
+                    return (
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusStyles[computedStatus]}`}
+                      >
+                        {computedStatus}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">Source</p>

@@ -7,6 +7,7 @@ import type { DateRangeFilter } from "../utils/dateRangeFilter";
 import { getDisplayStatus, getInvoiceDueDate, formatDisplayDate } from "../utils/invoiceDates";
 
 const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
+const DASHBOARD_RANGE_KEY = "cashflow_dashboard_date_range";
 
 const isOutstanding = (inv: Invoice): boolean => {
   const status = (inv.status || "").toLowerCase();
@@ -21,7 +22,6 @@ const statusStyles: Record<string, string> = {
 };
 
 type Props = {
-  dateRange: string;
   invoices: Invoice[];
 };
 
@@ -35,11 +35,17 @@ type CashflowSummaryResponse = {
   summary: string;
 };
 
-export default function DashboardTab({ dateRange: _dateRange, invoices }: Props) {
+export default function DashboardTab({ invoices }: Props) {
   const [summary, setSummary] = useState<string>("");
   const [summaryLoading, setSummaryLoading] = useState<boolean>(true);
   const [summaryError, setSummaryError] = useState<boolean>(false);
-  const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeFilter>("last_90_days");
+  const [dateRangeFilter, setDateRangeFilter] = useState<DateRangeFilter>(() => {
+    const fallback: DateRangeFilter = "all";
+    if (typeof window === "undefined") return fallback;
+    const stored = window.localStorage.getItem(DASHBOARD_RANGE_KEY);
+    const validRanges: DateRangeFilter[] = ["all", "last_30_days", "last_90_days", "next_14_days", "next_3_months"];
+    return stored && (validRanges as string[]).includes(stored) ? (stored as DateRangeFilter) : fallback;
+  });
   const [metrics, setMetrics] = useState<CashflowSummaryResponse["metrics"] | null>(null);
 
   const apiBases = (() => {
@@ -165,11 +171,18 @@ export default function DashboardTab({ dateRange: _dateRange, invoices }: Props)
           <select
             className="bg-transparent focus:outline-none"
             value={dateRangeFilter}
-            onChange={(e) => setDateRangeFilter(e.target.value as DateRangeFilter)}
+            onChange={(e) => {
+              const next = e.target.value as DateRangeFilter;
+              setDateRangeFilter(next);
+              if (typeof window !== "undefined") {
+                window.localStorage.setItem(DASHBOARD_RANGE_KEY, next);
+              }
+            }}
           >
             <option value="last_30_days">Last 30 days</option>
             <option value="last_90_days">Last 90 days</option>
-            <option value="last_12_months">Last 12 months</option>
+            <option value="next_14_days">Next 14 days</option>
+            <option value="next_3_months">Next 3 months</option>
             <option value="all">All time</option>
           </select>
           <span className="ml-3 text-xs font-medium text-slate-500">{rangeLabel}</span>

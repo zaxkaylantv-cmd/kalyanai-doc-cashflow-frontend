@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CalendarRange, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import DashboardTab from "./components/DashboardTab";
 import DocumentsTab from "./components/DocumentsTab";
 import CashflowTab from "./components/CashflowTab";
@@ -36,7 +36,6 @@ const tryFetchAcrossBases = async (path: string, init?: RequestInit) => {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
-  const [dateRange] = useState("Oct 15 – Dec 15, 2024");
   const [invoices, setInvoices] = useState<Invoice[]>(() => mockInvoices);
   const company = "Demo Company Ltd";
 
@@ -125,10 +124,6 @@ export default function App() {
             </div>
           </div>
           <div className="hidden items-center gap-3 sm:flex">
-            <button className="inline-flex items-center rounded-lg border border-cyan-100 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-cyan-50">
-              <CalendarRange className="mr-2 h-4 w-4 text-cyan-600" />
-              {dateRange}
-            </button>
             <div className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-gradient-to-br from-cyan-100 via-blue-100 to-purple-100 text-slate-800">
               DC
             </div>
@@ -162,7 +157,7 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10 space-y-8">
-        {activeTab === "dashboard" && <DashboardTab dateRange={dateRange} invoices={activeInvoices} />}
+        {activeTab === "dashboard" && <DashboardTab invoices={activeInvoices} />}
         {activeTab === "documents" && (
           <DocumentsTab
             invoices={activeInvoices}
@@ -172,7 +167,7 @@ export default function App() {
             onArchiveInvoice={handleArchiveInvoice}
           />
         )}
-        {activeTab === "cashflow" && <CashflowTab dateRange={dateRange} invoices={activeInvoices} />}
+        {activeTab === "cashflow" && <CashflowTab invoices={activeInvoices} />}
         {activeTab === "settings" && <SettingsTab />}
       </main>
     </div>

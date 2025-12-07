@@ -5,14 +5,20 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 export type DisplayStatus = "Paid" | "Overdue" | "Due soon" | "Upcoming" | "Unpaid";
 
 export const getInvoiceDueDate = (invoice: Invoice): Date | null => {
-  const raw =
-    (invoice as any).dueDateIso ??
-    (invoice as any).due_date_iso ??
-    invoice.dueDate ??
-    (invoice as any).due_date;
-  if (!raw) return null;
-  const parsed = new Date(raw);
-  return isNaN(parsed.getTime()) ? null : parsed;
+  const rawCandidates = [
+    (invoice as any).dueDateIso,
+    (invoice as any).due_date_iso,
+    invoice.dueDate,
+    (invoice as any).due_date,
+  ];
+
+  for (const raw of rawCandidates) {
+    if (!raw) continue;
+    const parsed = new Date(raw);
+    if (!isNaN(parsed.getTime())) return parsed;
+  }
+
+  return null;
 };
 
 export const getInvoiceIssueDate = (invoice: Invoice): Date | null => {

@@ -15,7 +15,6 @@ const statusStyles = {
 } as const;
 
 type Props = {
-  dateRange: string;
   invoices: Invoice[];
 };
 
@@ -34,7 +33,7 @@ const getWeekStart = (date: Date) => {
   return d;
 };
 
-export default function CashflowTab({ dateRange: _dateRange, invoices }: Props) {
+export default function CashflowTab({ invoices }: Props) {
   const [showAllWeeks, setShowAllWeeks] = useState(false);
   const today = new Date();
   const windowStart = new Date(today.getTime() - 90 * 24 * 60 * 60 * 1000);

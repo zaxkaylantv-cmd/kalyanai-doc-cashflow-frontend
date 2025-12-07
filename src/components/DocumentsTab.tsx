@@ -3,6 +3,7 @@ import { Mail, UploadCloud, FileText } from "lucide-react";
 import type { Invoice, InvoiceSource, InvoiceStatus } from "../data/mockInvoices";
 import type { DateRangeFilter } from "../utils/dateRangeFilter";
 import { isInvoiceInDateRange, formatRangeLabel } from "../utils/dateRangeFilter";
+import { tryFetchAcrossBases } from "../App";
 
 const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 const formatInvoiceDate = (value: string | null | undefined) => {
@@ -732,7 +733,7 @@ export default function DocumentsTab({
                           status: editValues.status || undefined,
                           category: editValues.category || undefined,
                         };
-                        const res = await fetch(`/api/invoices/${selectedDoc.id}`, {
+                        const res = await tryFetchAcrossBases(`/api/invoices/${selectedDoc.id}`, {
                           method: "PATCH",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify(body),

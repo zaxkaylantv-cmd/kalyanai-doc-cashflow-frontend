@@ -15,7 +15,7 @@ const apiBases = (() => {
   return isDev ? [""] : ["/cashflow-api", "http://185.151.29.141:3002"];
 })();
 
-const tryFetchAcrossBases = async (path: string, init?: RequestInit) => {
+export const tryFetchAcrossBases = async (path: string, init?: RequestInit) => {
   let lastError: unknown = null;
   for (const base of apiBases) {
     const url = `${base}${path}`;

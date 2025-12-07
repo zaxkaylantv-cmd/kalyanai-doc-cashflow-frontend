@@ -94,6 +94,10 @@ export default function App() {
     setInvoices((prev) => [...prev, newInvoice]);
   };
 
+  const handleInvoiceUpdated = (updated: Invoice) => {
+    setInvoices((prev) => prev.map((inv) => (inv.id === updated.id ? { ...inv, ...updated } : inv)));
+  };
+
   const handleArchiveInvoice = async (id: number | string) => {
     setInvoices((prev) => prev.filter((inv) => inv.id !== id));
     try {
@@ -164,6 +168,7 @@ export default function App() {
             onMarkPaid={markAsPaid}
             onArchive={archiveInvoice}
             onInvoiceCreatedFromUpload={handleInvoiceCreatedFromUpload}
+            onInvoiceUpdated={handleInvoiceUpdated}
             onArchiveInvoice={handleArchiveInvoice}
           />
         )}

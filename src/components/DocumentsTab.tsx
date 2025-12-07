@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Mail, UploadCloud, FileText } from "lucide-react";
 import type { Invoice, InvoiceSource, InvoiceStatus } from "../data/mockInvoices";
 import type { DateRangeFilter } from "../utils/dateRangeFilter";
@@ -70,6 +70,7 @@ type Props = {
   onArchive: (id: string) => void;
   onInvoiceCreatedFromUpload?: (invoice: Invoice) => void;
   onArchiveInvoice?: (id: number | string) => void;
+  onInvoiceUpdated?: (invoice: Invoice) => void;
 };
 
 export default function DocumentsTab({
@@ -78,6 +79,7 @@ export default function DocumentsTab({
   onArchive,
   onInvoiceCreatedFromUpload,
   onArchiveInvoice,
+  onInvoiceUpdated,
 }: Props) {
   const now = useMemo(() => new Date(), []);
 
@@ -86,6 +88,17 @@ export default function DocumentsTab({
   const [emailPaused, setEmailPaused] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValues, setEditValues] = useState({
+    supplier: "",
+    invoiceNumber: "",
+    issue_date: "",
+    due_date: "",
+    amount: "",
+    status: "",
+    category: "",
+  });
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [filters, setFilters] = useState(() => {
     const fallback: DateRangeFilter = "all";
     if (typeof window === "undefined") {
@@ -133,6 +146,22 @@ export default function DocumentsTab({
     () => invoices.find((doc) => doc.id === selectedDocId) ?? null,
     [invoices, selectedDocId],
   );
+
+  useEffect(() => {
+    if (selectedDoc) {
+      setEditValues({
+        supplier: selectedDoc.supplier ?? "",
+        invoiceNumber: selectedDoc.invoiceNumber ?? (selectedDoc as any).invoice_number ?? "",
+        issue_date: selectedDoc.issue_date ?? "",
+        due_date: selectedDoc.due_date ?? "",
+        amount: selectedDoc.amount != null ? String(selectedDoc.amount) : "",
+        status: selectedDoc.status ?? "",
+        category: selectedDoc.category ?? "",
+      });
+      setIsEditing(false);
+      setSaveError(null);
+    }
+  }, [selectedDoc]);
 
   const supplierHistory = useMemo(() => {
     if (!selectedDoc) return [];
@@ -507,24 +536,72 @@ export default function DocumentsTab({
               <button className="text-slate-500 hover:text-slate-800" onClick={() => setSelectedDocId(null)}>
                 Close
               </button>
+              {selectedDoc && (
+                <button
+                  type="button"
+                  className="text-sm text-sky-700 underline"
+                  onClick={() => {
+                    if (isEditing) {
+                      setIsEditing(false);
+                      setEditValues({
+                        supplier: selectedDoc.supplier ?? "",
+                        invoiceNumber: selectedDoc.invoiceNumber ?? (selectedDoc as any).invoice_number ?? "",
+                        issue_date: selectedDoc.issue_date ?? "",
+                        due_date: selectedDoc.due_date ?? "",
+                        amount: selectedDoc.amount != null ? String(selectedDoc.amount) : "",
+                        status: selectedDoc.status ?? "",
+                        category: selectedDoc.category ?? "",
+                      });
+                    } else {
+                      setIsEditing(true);
+                    }
+                  }}
+                >
+                  {isEditing ? "Cancel" : "Edit"}
+                </button>
+              )}
             </div>
 
             <div className="mt-4 space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
                 <div>
                   <p className="text-xs text-slate-500">Supplier</p>
-                  <p className="font-semibold text-slate-900">{selectedDoc.supplier}</p>
+                  {isEditing ? (
+                    <input
+                      className="w-full rounded-md border px-3 py-2 text-sm"
+                      value={editValues.supplier}
+                      onChange={(e) => setEditValues((v) => ({ ...v, supplier: e.target.value }))}
+                    />
+                  ) : (
+                    <p className="font-semibold text-slate-900">{selectedDoc.supplier}</p>
+                  )}
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-slate-500">Status</p>
                   {(() => {
                     const computedStatus = computeInvoiceStatus(selectedDoc);
                     return (
-                      <span
-                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusStyles[computedStatus]}`}
-                      >
-                        {computedStatus}
-                      </span>
+                      <>
+                        {isEditing ? (
+                          <select
+                            className="rounded-md border px-2 py-1 text-xs"
+                            value={editValues.status}
+                            onChange={(e) => setEditValues((v) => ({ ...v, status: e.target.value }))}
+                          >
+                            {["Upcoming", "Overdue", "Paid"].map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusStyles[computedStatus]}`}
+                          >
+                            {computedStatus}
+                          </span>
+                        )}
+                      </>
                     );
                   })()}
                 </div>
@@ -536,7 +613,15 @@ export default function DocumentsTab({
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-slate-500">Total</p>
-                  <p className="font-semibold text-slate-900">{currency.format(selectedDoc.amount)}</p>
+                  {isEditing ? (
+                    <input
+                      className="w-full rounded-md border px-3 py-2 text-sm text-right"
+                      value={editValues.amount}
+                      onChange={(e) => setEditValues((v) => ({ ...v, amount: e.target.value }))}
+                    />
+                  ) : (
+                    <p className="font-semibold text-slate-900">{currency.format(selectedDoc.amount)}</p>
+                  )}
                 </div>
               </div>
 
@@ -545,11 +630,29 @@ export default function DocumentsTab({
                 <div className="mt-3 grid grid-cols-2 gap-3">
                   <div>
                     <p className="text-xs text-slate-500">Issue date</p>
-                    <p className="font-medium text-slate-900">{formatInvoiceDate(getIssueDate(selectedDoc))}</p>
+                    {isEditing ? (
+                      <input
+                        className="w-full rounded-md border px-3 py-2 text-sm"
+                        type="date"
+                        value={editValues.issue_date}
+                        onChange={(e) => setEditValues((v) => ({ ...v, issue_date: e.target.value }))}
+                      />
+                    ) : (
+                      <p className="font-medium text-slate-900">{formatInvoiceDate(getIssueDate(selectedDoc))}</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Due date</p>
-                    <p className="font-medium text-slate-900">{formatInvoiceDate(getDueDate(selectedDoc))}</p>
+                    {isEditing ? (
+                      <input
+                        className="w-full rounded-md border px-3 py-2 text-sm"
+                        type="date"
+                        value={editValues.due_date}
+                        onChange={(e) => setEditValues((v) => ({ ...v, due_date: e.target.value }))}
+                      />
+                    ) : (
+                      <p className="font-medium text-slate-900">{formatInvoiceDate(getDueDate(selectedDoc))}</p>
+                    )}
                   </div>
                   <div>
                     <p className="text-xs text-slate-500">Subtotal</p>
@@ -567,11 +670,21 @@ export default function DocumentsTab({
                 <div className="mt-3 space-y-2">
                   <label className="flex flex-col gap-1">
                     <span className="text-xs text-slate-500">Category</span>
-                    <select className="rounded-lg border border-slate-200 px-3 py-2" defaultValue={selectedDoc.category}>
-                      {["Rent", "Utilities", "Marketing", "Staff", "Software", "Other"].map((opt) => (
-                        <option key={opt}>{opt}</option>
-                      ))}
-                    </select>
+                    {isEditing ? (
+                      <select
+                        className="rounded-lg border border-slate-200 px-3 py-2"
+                        value={editValues.category}
+                        onChange={(e) => setEditValues((v) => ({ ...v, category: e.target.value }))}
+                      >
+                        {["Rent", "Utilities", "Marketing", "Staff", "Software", "Other", "Uncategorised"].map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="font-medium text-slate-900">{selectedDoc.category}</p>
+                    )}
                   </label>
                   <label className="flex flex-col gap-1">
                     <span className="text-xs text-slate-500">Notes</span>
@@ -601,6 +714,50 @@ export default function DocumentsTab({
                   </div>
                 </div>
               </div>
+
+              {isEditing && selectedDoc && (
+                <div className="mt-4 flex items-center gap-3">
+                  <button
+                    type="button"
+                    className="rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white"
+                    onClick={async () => {
+                      try {
+                        setSaveError(null);
+                        const body = {
+                          supplier: editValues.supplier || undefined,
+                          invoice_number: editValues.invoiceNumber || undefined,
+                          issue_date: editValues.issue_date || undefined,
+                          due_date: editValues.due_date || undefined,
+                          amount: editValues.amount ? parseFloat(editValues.amount) : undefined,
+                          status: editValues.status || undefined,
+                          category: editValues.category || undefined,
+                        };
+                        const res = await fetch(`/api/invoices/${selectedDoc.id}`, {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify(body),
+                        });
+                        if (!res.ok) {
+                          throw new Error(`HTTP ${res.status}`);
+                        }
+                        const updated: Invoice = {
+                          ...selectedDoc,
+                          ...body,
+                          amount: body.amount ?? selectedDoc.amount,
+                        } as Invoice;
+                        onInvoiceUpdated?.(updated);
+                        setIsEditing(false);
+                      } catch (err) {
+                        console.error("Failed to save invoice", err);
+                        setSaveError("Failed to save changes. Please try again.");
+                      }
+                    }}
+                  >
+                    Save changes
+                  </button>
+                  {saveError && <p className="text-sm text-red-600">{saveError}</p>}
+                </div>
+              )}
 
               <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">AI automations &amp; optimisation</p>

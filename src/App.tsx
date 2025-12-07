@@ -37,7 +37,7 @@ const tryFetchAcrossBases = async (path: string, init?: RequestInit) => {
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [invoices, setInvoices] = useState<Invoice[]>(() => mockInvoices);
-  const company = "Demo Company Ltd";
+  const company = "Kalyan AI";
 
   useEffect(() => {
     const loadInvoices = async () => {

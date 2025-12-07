@@ -134,6 +134,66 @@ export default function DocumentsTab({
     [invoices, selectedDocId],
   );
 
+  const supplierHistory = useMemo(() => {
+    if (!selectedDoc) return [];
+    return invoices
+      .filter((inv) => inv.supplier === selectedDoc.supplier)
+      .map((inv) => {
+        const due = inv.due_date ?? inv.dueDate;
+        return { ...inv, _parsedDue: due ? new Date(due) : null };
+      })
+      .sort((a, b) => {
+        const aTime = a._parsedDue?.getTime() ?? 0;
+        const bTime = b._parsedDue?.getTime() ?? 0;
+        return aTime - bTime;
+      });
+  }, [invoices, selectedDoc]);
+
+  const paidHistory = useMemo(() => supplierHistory.filter((inv) => inv.status === "Paid"), [supplierHistory]);
+
+  const avgPaidAmount = useMemo(() => {
+    if (!paidHistory.length) return 0;
+    return paidHistory.reduce((sum, inv) => sum + inv.amount, 0) / paidHistory.length;
+  }, [paidHistory]);
+
+  const hasSupplierHistory = supplierHistory.length > 0;
+  const autoApproveThreshold = useMemo(() => Math.round(((avgPaidAmount || (selectedDoc?.amount ?? 0)) * 1.5) / 50) * 50, [avgPaidAmount, selectedDoc?.amount]);
+
+  const shouldSuggestAutoApprove = useMemo(() => {
+    if (!selectedDoc) return false;
+    const baseline = avgPaidAmount || selectedDoc.amount || 0;
+    return hasSupplierHistory && paidHistory.length >= 1 && selectedDoc.amount <= baseline * 1.5;
+  }, [avgPaidAmount, hasSupplierHistory, paidHistory.length, selectedDoc]);
+
+  const negotiationInsight = useMemo(() => {
+    if (!supplierHistory.length) return { shouldSuggest: false, increasePct: 0, recentAvg: 0, previousAvg: 0 };
+
+    const recent = supplierHistory.slice(-3);
+    const previous = supplierHistory.slice(-6, -3);
+
+    if (recent.length < 3 || previous.length < 3) {
+      return { shouldSuggest: false, increasePct: 0, recentAvg: 0, previousAvg: 0 };
+    }
+
+    const avg = (arr: typeof supplierHistory) =>
+      arr.reduce((sum, inv) => sum + inv.amount, 0) / (arr.length || 1);
+
+    const recentAvg = avg(recent);
+    const previousAvg = avg(previous);
+
+    if (!previousAvg) {
+      return { shouldSuggest: false, increasePct: 0, recentAvg, previousAvg };
+    }
+
+    const increasePct = ((recentAvg - previousAvg) / previousAvg) * 100;
+    return {
+      shouldSuggest: increasePct >= 15,
+      increasePct,
+      recentAvg,
+      previousAvg,
+    };
+  }, [supplierHistory]);
+
   const apiBases = (() => {
     if (typeof window === "undefined") return [""];
     const isDev = window.location.port === "5175" || window.location.hostname === "localhost";
@@ -538,6 +598,81 @@ export default function DocumentsTab({
                   <div className="flex items-center justify-between rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2">
                     <span>Confidence</span>
                     <span className="text-sm font-semibold">92%</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">AI automations &amp; optimisation</p>
+                <div className="mt-3 space-y-3 text-sm text-slate-700">
+                  {hasSupplierHistory && (
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 shadow-[0_6px_18px_rgba(16,185,129,0.15)]">
+                      <p className="font-semibold text-emerald-800">Auto-approval suggestion</p>
+                      {shouldSuggestAutoApprove ? (
+                        <p className="mt-1 text-emerald-900">
+                          Invoices from {selectedDoc.supplier} are regular and within a typical range. Consider
+                          auto-approving {selectedDoc.category || "these invoices"} up to about{" "}
+                          {currency.format(autoApproveThreshold)}.
+                        </p>
+                      ) : (
+                        <p className="mt-1 text-emerald-900">
+                          As Kalyan AI sees more invoices from {selectedDoc.supplier}, it can learn a safe auto-approval
+                          limit for you.
+                        </p>
+                      )}
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-emerald-700"
+                          onClick={() =>
+                            console.log(
+                              "TODO: create auto-approval rule for",
+                              selectedDoc.supplier,
+                              shouldSuggestAutoApprove && autoApproveThreshold
+                                ? autoApproveThreshold
+                                : selectedDoc.amount,
+                            )
+                          }
+                        >
+                          Create auto-approval rule
+                        </button>
+                        <button
+                          className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50"
+                          onClick={() => console.log("Auto-approval suggestion dismissed for", selectedDoc.supplier)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-lg border border-cyan-100 bg-cyan-50 px-3 py-2 shadow-[0_6px_18px_rgba(8,145,178,0.15)]">
+                    {negotiationInsight.shouldSuggest ? (
+                      <>
+                        <p className="font-semibold text-cyan-800">Cost optimisation opportunity</p>
+                        <p className="mt-1 text-cyan-900">
+                          Your average spend with {selectedDoc.supplier} is up about{" "}
+                          {Math.round(negotiationInsight.increasePct)}% compared with earlier invoices. It may be worth
+                          reviewing your tariff or plan.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-semibold text-cyan-800">Supplier spend insight</p>
+                        <p className="mt-1 text-cyan-900">
+                          Spend with {selectedDoc.supplier} has been stable over recent months.
+                        </p>
+                      </>
+                    )}
+                    <button
+                      className="mt-2 rounded-lg bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white shadow hover:bg-cyan-700"
+                      onClick={() =>
+                        alert(
+                          `AI would draft an email to ${selectedDoc.supplier} using your recent spend and this invoice.`,
+                        )
+                      }
+                    >
+                      Draft email to supplier
+                    </button>
                   </div>
                 </div>
               </div>

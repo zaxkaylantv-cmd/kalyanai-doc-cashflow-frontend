@@ -128,6 +128,11 @@ export default function DashboardTab({ invoices }: Props) {
   const dueIn7Amount = dueIn7.reduce((sum, item) => sum + item.inv.amount, 0);
   const dueIn30Amount = dueIn30.reduce((sum, item) => sum + item.inv.amount, 0);
   const overdueAmount = overdue.reduce((sum, item) => sum + item.inv.amount, 0);
+  const totalOutstandingAmount = outstanding.reduce((sum, inv) => sum + inv.amount, 0);
+  const largestOverdue =
+    overdue.length > 0
+      ? overdue.reduce((prev, curr) => (curr.inv.amount > prev.inv.amount ? curr : prev)).inv
+      : null;
 
   const upcomingNotPaid = outstanding.filter((inv) => {
     const due = getInvoiceDueDate(inv);
@@ -280,6 +285,26 @@ export default function DashboardTab({ invoices }: Props) {
               <p className="text-sm font-semibold text-slate-900">AI Cash Flow Analysis</p>
               {summaryLoading && <p>Analysing your cashflow…</p>}
               {summaryError && <p className="text-rose-600">AI summary unavailable. Please try again later.</p>}
+              {!summaryLoading && !summaryError && (
+                <div className="text-left">
+                  <p className="text-sm text-slate-600">
+                    <strong>AI summary for this period:</strong>
+                  </p>
+                  <ul className="mt-2 space-y-1 text-sm text-slate-600">
+                    <li>• Cash due in the next 30 days: {currency.format(dueIn30Amount)} across {dueIn30.length} invoice(s).</li>
+                    <li>
+                      • Overdue exposure: {currency.format(overdueAmount)} across {overdue.length} invoice(s)
+                      {largestOverdue ? `; largest single bill around ${currency.format(largestOverdue.amount)}.` : "."}
+                    </li>
+                    <li>
+                      • Overall outstanding (overdue + upcoming): {currency.format(totalOutstandingAmount)} – plan cash to comfortably cover this runway.
+                    </li>
+                  </ul>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Kalyan AI suggests tackling overdue items first, then scheduling upcoming payments to smooth the next few weeks of cash outflow.
+                  </p>
+                </div>
+              )}
               {!summaryLoading && !summaryError && summary && <p className="whitespace-pre-line">{summary}</p>}
               {!summaryLoading && !summaryError && !summary && (
                 <p className="text-slate-700">Summary not available yet. Please try again shortly.</p>
